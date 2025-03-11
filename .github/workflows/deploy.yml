@@ -22,16 +22,8 @@ jobs:
       - name: Install Composer dependencies
         run: composer install --prefer-dist --no-interaction --no-dev --optimize-autoloader
 
-      - name: Copy .env file
-        run: cp .env.example .env
-        
-      - name: Update .env file for production
-        run: |
-          sed -i 's/APP_ENV=local/APP_ENV=production/' .env
-          sed -i 's/APP_DEBUG=true/APP_DEBUG=false/' .env
-          
-      - name: Generate application key
-        run: php artisan key:generate
+      # .envファイルはさくらサーバー上のものを使用するため、ここでは.envファイルを作成しない
+      # 開発用キーの生成も不要
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
@@ -62,11 +54,16 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "mkdir -p ${{ secrets.SAKURA_PATH }}"
           
+      - name: Backup existing .env file
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "if [ -f ${{ secrets.SAKURA_PATH }}/.env ]; then cp ${{ secrets.SAKURA_PATH }}/.env ${{ secrets.SAKURA_PATH }}/.env.backup; fi"
+          
       - name: Deploy to Sakura Server
         run: |
           rsync -avz --exclude='.git/' \
                     --exclude='.github/' \
                     --exclude='node_modules/' \
+                    --exclude='.env' \
                     --exclude='.env.example' \
                     --exclude='.env.testing' \
                     --exclude='tests/' \
@@ -76,6 +73,10 @@ jobs:
                     --exclude='storage/framework/views/*' \
                     -e 'ssh -i ~/.ssh/id_rsa' \
                     ./ ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }}:${{ secrets.SAKURA_PATH }}
+
+      - name: Restore .env file
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "if [ -f ${{ secrets.SAKURA_PATH }}/.env.backup ]; then mv ${{ secrets.SAKURA_PATH }}/.env.backup ${{ secrets.SAKURA_PATH }}/.env; fi"
 
       - name: Set correct permissions
         run: |
@@ -94,7 +95,6 @@ jobs:
       - name: Clear all caches
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
-          php artisan cache:clear && \
           php artisan config:clear && \
           php artisan route:clear && \
           php artisan view:clear && \
