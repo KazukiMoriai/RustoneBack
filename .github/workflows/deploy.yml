@@ -1,0 +1,59 @@
+name: Deploy to Sakura Server
+
+on:
+  push:
+    branches: [ main ]  # mainブランチにプッシュされたときに実行
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'  # さくらサーバーで使用しているPHPバージョンに合わせる
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, dom, filter, gd, json, libxml
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-dev --optimize-autoloader
+
+      - name: Copy .env file
+        run: cp .env.example .env
+        
+      - name: Generate application key
+        run: php artisan key:generate
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh/
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          
+      - name: Deploy to Sakura Server
+        run: |
+          rsync -avz --exclude='.git/' \
+                    --exclude='.github/' \
+                    --exclude='node_modules/' \
+                    --exclude='.env.example' \
+                    --exclude='.env.testing' \
+                    --exclude='tests/' \
+                    --exclude='storage/logs/*' \
+                    --exclude='storage/framework/cache/*' \
+                    --exclude='storage/framework/sessions/*' \
+                    --exclude='storage/framework/views/*' \
+                    -e 'ssh -i ~/.ssh/id_rsa' \
+                    ./ ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }}:${{ secrets.SAKURA_PATH }}
+
+      - name: Post Deployment Commands
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          php artisan config:cache && \
+          php artisan route:cache && \
+          php artisan view:cache && \
+          php artisan migrate --force"
