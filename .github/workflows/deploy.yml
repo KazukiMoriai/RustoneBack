@@ -25,6 +25,11 @@ jobs:
       - name: Copy .env file
         run: cp .env.example .env
         
+      - name: Update .env file for production
+        run: |
+          sed -i 's/APP_ENV=local/APP_ENV=production/' .env
+          sed -i 's/APP_DEBUG=true/APP_DEBUG=false/' .env
+          
       - name: Generate application key
         run: php artisan key:generate
 
@@ -38,6 +43,13 @@ jobs:
         
       - name: Build assets
         run: npm run build
+
+      - name: Create root .htaccess
+        run: |
+          echo '<IfModule mod_rewrite.c>
+              RewriteEngine On
+              RewriteRule ^(.*)$ public/$1 [L]
+          </IfModule>' > .htaccess
 
       - name: Set up SSH
         run: |
@@ -65,16 +77,47 @@ jobs:
                     -e 'ssh -i ~/.ssh/id_rsa' \
                     ./ ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }}:${{ secrets.SAKURA_PATH }}
 
-      - name: Set permissions and create storage directories
+      - name: Set correct permissions
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
-          mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views && \
-          chmod -R 777 storage bootstrap/cache"
+          find . -type f -exec chmod 644 {} \; && \
+          find . -type d -exec chmod 755 {} \; && \
+          chmod -R 777 storage bootstrap/cache && \
+          chmod 644 public/.htaccess && \
+          chmod 644 .htaccess"
 
-      - name: Post Deployment Commands
+      - name: Create storage directories
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views"
+
+      - name: Clear all caches
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          php artisan cache:clear && \
+          php artisan config:clear && \
+          php artisan route:clear && \
+          php artisan view:clear && \
+          php artisan optimize:clear"
+
+      - name: Exit maintenance mode (if applicable)
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          php artisan up"
+
+      - name: Update database if needed
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          php artisan migrate --force"
+
+      - name: Rebuild caches for production
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
           php artisan config:cache && \
           php artisan route:cache && \
-          php artisan view:cache && \
-          php artisan migrate --force"
+          php artisan view:cache"
+
+      - name: Check route list (diagnostic)
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          php artisan route:list | grep -e '^ *GET' -e '^ *HEAD' -e '^+'"
