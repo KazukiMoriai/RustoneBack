@@ -28,12 +28,27 @@ jobs:
       - name: Generate application key
         run: php artisan key:generate
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          
+      - name: Install NPM dependencies
+        run: npm install
+        
+      - name: Build assets
+        run: npm run build
+
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh/
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          
+      - name: Create deployment directory
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "mkdir -p ${{ secrets.SAKURA_PATH }}"
           
       - name: Deploy to Sakura Server
         run: |
@@ -50,6 +65,12 @@ jobs:
                     -e 'ssh -i ~/.ssh/id_rsa' \
                     ./ ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }}:${{ secrets.SAKURA_PATH }}
 
+      - name: Set permissions and create storage directories
+        run: |
+          ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
+          mkdir -p storage/logs storage/framework/cache storage/framework/sessions storage/framework/views && \
+          chmod -R 777 storage bootstrap/cache"
+
       - name: Post Deployment Commands
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.SAKURA_USER }}@${{ secrets.SAKURA_HOST }} "cd ${{ secrets.SAKURA_PATH }} && \
@@ -57,4 +78,3 @@ jobs:
           php artisan route:cache && \
           php artisan view:cache && \
           php artisan migrate --force"
-          
