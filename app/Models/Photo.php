@@ -15,4 +15,9 @@ class Photo extends Model
         'mime_type',
         'file_size'
     ];
+
+    public function signature()
+{
+    return $this->hasOne(Signature::class);
+}
 } 
